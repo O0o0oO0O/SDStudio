@@ -7,6 +7,7 @@ import { queueI2IWorkflow, TaskParam } from "../TaskQueueService";
 import { AugmentJob, GenericScene, SDAbstractJob, Session } from "../types";
 import { emotions } from "./AugmentWorkFlow";
 import { createI2IPreset } from "./SDWorkFlow";
+import { PromptService } from "../PromptService";
 
 export const queueRemoveBg = async (
   session: Session,
@@ -96,7 +97,6 @@ export const queueLineart = createQueueAugment('lineart');
 const getColorizeInput = async (
   session: Session,
 ) => {
-
   const defry = await appState.pushDialogAsync({
     text: 'defry를 선택해주세요',
     type: 'dropdown',
@@ -104,12 +104,46 @@ const getColorizeInput = async (
   });
   if (defry == null) return null;
 
-  const prompt = await appState.pushDialogAsync({
-    text: '프롬프트를 입력해주세요',
+  const promptInput = await appState.pushDialogAsync({
+    text: '프롬프트를 입력해주세요 (프롬프트 조각 <라이브러리.조각이름> 형식 사용 가능)',
     type: 'input-confirm',
   });
-  if (prompt == null) return null;
-  return { prompt, weaken: parseInt(defry) };
+  if (promptInput == null) return null;
+  
+  // 프롬프트 조각 처리
+  let finalPrompt = promptInput;
+  
+  try {
+    // <...> 패턴이 있는지 확인
+    const piecePattern = /<([^>]+)>/g;
+    const matches = [...promptInput.matchAll(piecePattern)];
+    
+    if (matches.length > 0) {
+      // 조각 패턴이 발견되면 PromptService 생성
+      const promptService = new PromptService();
+      
+      // 각 조각마다 처리
+      for (const match of matches) {
+        const piece = match[0]; // 전체 매치 (예: <캐릭터.소녀>)
+        const pieceName = match[1]; // 조각 이름 (예: 캐릭터.소녀)
+        
+        try {
+          // 조각 확장
+          const expandedPiece = promptService.tryExpandPiece(piece, session);
+          // 원본 조각을 확장된 내용으로 대체
+          finalPrompt = finalPrompt.replace(piece, expandedPiece);
+        } catch (error) {
+          // 특정 조각 처리 오류 시 사용자에게 알림
+          appState.pushMessage(`조각 '${pieceName}' 처리 중 오류가 발생했어요: ${error instanceof Error ? error.message : '알 수 없는 오류'}`);
+        }
+      }
+    }
+  } catch (error) {
+    // 전체 처리 오류 시 원본 프롬프트 유지
+    appState.pushMessage('프롬프트 조각 처리 중 오류가 발생했어요: ' + (error instanceof Error ? error.message : '알 수 없는 오류'));
+  }
+  
+  return { prompt: finalPrompt, weaken: parseInt(defry) };
 }
 
 const queueColorize = async (
@@ -132,7 +166,7 @@ const getEmotionInput = async (
     type: 'dropdown',
     items: emotions.map((x) => ({ text: x, value: x })),
   });
-  if (!emotion) return null;
+  if (emotion == null) return null;
 
   const defry = await appState.pushDialogAsync({
     text: 'defry를 선택해주세요',
@@ -141,12 +175,39 @@ const getEmotionInput = async (
   });
   if (defry == null) return null;
 
-  const prompt = await appState.pushDialogAsync({
-    text: '프롬프트를 입력해주세요',
+  const promptInput = await appState.pushDialogAsync({
+    text: '프롬프트를 입력해주세요 (프롬프트 조각 <라이브러리.조각이름> 형식 사용 가능)',
     type: 'input-confirm',
   });
-  if (prompt == null) return null;
-  return { emotion, prompt, weaken: parseInt(defry) };
+  if (promptInput == null) return null;
+  
+  // 프롬프트 조각 처리 (위와 동일한 로직)
+  let finalPrompt = promptInput;
+  
+  try {
+    const piecePattern = /<([^>]+)>/g;
+    const matches = [...promptInput.matchAll(piecePattern)];
+    
+    if (matches.length > 0) {
+      const promptService = new PromptService();
+      
+      for (const match of matches) {
+        const piece = match[0];
+        const pieceName = match[1];
+        
+        try {
+          const expandedPiece = promptService.tryExpandPiece(piece, session);
+          finalPrompt = finalPrompt.replace(piece, expandedPiece);
+        } catch (error) {
+          appState.pushMessage(`조각 '${pieceName}' 처리 중 오류가 발생했어요: ${error instanceof Error ? error.message : '알 수 없는 오류'}`);
+        }
+      }
+    }
+  } catch (error) {
+    appState.pushMessage('프롬프트 조각 처리 중 오류가 발생했어요: ' + (error instanceof Error ? error.message : '알 수 없는 오류'));
+  }
+  
+  return { emotion, prompt: finalPrompt, weaken: parseInt(defry) };
 }
 
 const queueEmotion = async (
